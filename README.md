@@ -388,41 +388,47 @@ python web/app.py --port 8080
 ## Δομή Project
 
 ```
-wiki-search/
-├── data/                  # Δεδομένα και ευρετήρια
-│   ├── raw/              # Ακατέργαστα άρθρα
-│   ├── processed/        # Επεξεργασμένα άρθρα
-│   ├── models/           # Αποθηκευμένα μοντέλα
-│   └── index/           # Ευρετήρια
+retrieve/
+├── data/                      # Δεδομένα και ευρετήρια
+│   ├── processed_articles.json
+│   ├── inverted_index.json
+│   ├── document_vectors.json
+│   └── index_metadata.json
 ├── src/
-│   ├── crawler/          # Συλλογή άρθρων
-│   │   ├── wiki_crawler.py
-│   │   └── utils.py
-│   ├── preprocessing/    # Επεξεργασία κειμένου
-│   │   ├── tokenizer.py
-│   │   ├── normalizer.py
-│   │   ├── spell_checker.py
-│   │   ├── ner.py
-│   │   └── sentiment.py
-│   ├── indexing/        # Δημιουργία ευρετηρίου
-│   │   ├── indexer.py
-│   │   └── optimizer.py
-│   ├── search/          # Μηχανή αναζήτησης
-│   │   ├── searcher.py
-│   │   └── ranker.py
-│   └── evaluation/      # Αξιολόγηση απόδοσης
-│       ├── metrics.py
-│       └── benchmarks.py
-├── tests/               # Unit tests
-│   ├── test_crawler.py
-│   ├── test_preprocessing.py
-│   └── test_search.py
-├── web/                 # Web interface
-│   ├── static/
-│   ├── templates/
-│   └── app.py
-├── requirements.txt     # Εξαρτήσεις
-└── README.md           # Τεκμηρίωση
+│   ├── crawler/              # Web crawler για συλλογή άρθρων
+│   │   ├── __init__.py
+│   │   └── wiki_crawler.py   # Υλοποίηση crawler με wikipediaapi
+│   ├── preprocessing/        # Επεξεργασία κειμένου
+│   │   ├── __init__.py
+│   │   ├── download_models.py    # Κατέβασμα NLP μοντέλων
+│   │   ├── download_nltk.py      # Κατέβασμα NLTK resources
+│   │   ├── greek_embeddings.py   # Word embeddings για ελληνικά
+│   │   ├── greek_ner.py          # Named Entity Recognition
+│   │   ├── greek_sentiment.py    # Ανάλυση συναισθήματος
+│   │   ├── greek_spell_checker.py # Διόρθωση ορθογραφίας
+│   │   ├── greek_synonyms.py     # Διαχείριση συνωνύμων
+│   │   ├── reprocess_articles.py # Επανεπεξεργασία άρθρων
+│   │   ├── test_preprocessing.py # Unit tests
+│   │   └── text_processor.py     # Βασική επεξεργασία κειμένου
+│   ├── indexing/            # Δημιουργία ευρετηρίου
+│   │   ├── __init__.py
+│   │   ├── inverted_index.py
+│   │   └── test_search.py
+│   ├── search/             # Μηχανή αναζήτησης
+│   │   ├── __init__.py
+│   │   ├── search_engine.py
+│   │   └── create_indices.py
+│   └── evaluation/         # Αξιολόγηση συστήματος
+│       ├── __init__.py
+│       └── evaluation.py
+├── web/                   # Web interface
+│   ├── app.py            # Flask εφαρμογή
+│   └── templates/        # HTML templates
+│       └── index.html
+├── logs/                 # Αρχεία καταγραφής
+├── evaluation_results/   # Αποτελέσματα αξιολόγησης
+├── requirements.txt      # Εξαρτήσεις Python
+└── README.md            # Τεκμηρίωση
 ```
 
 ## Απαιτήσεις
@@ -578,3 +584,45 @@ SOFTWARE.
   - Query caching για συχνά ερωτήματα
   - Βελτιστοποίηση απόδοσης
   - Έξυπνη διαχείριση cache 
+
+# Search Engine Project
+
+## Πρόσφατες Βελτιώσεις
+
+### 1. Boolean Search
+- Υποστήριξη σύνθετων εκφράσεων με τελεστές AND (&&), OR (||), NOT (!)
+- Fuzzy matching με χρήση απόστασης Levenshtein
+- Βελτιωμένο σκοράρισμα με συνδυασμό ακριβών και fuzzy ταιριασμάτων
+- Πρόσθετο boost για ταιριάσματα στον τίτλο
+
+### 2. Vector Space Model (VSM)
+- Βελτιωμένος υπολογισμός TF-IDF με κανονικοποίηση
+- Query expansion με παρόμοιους και συχνά συνεμφανιζόμενους όρους
+- Κανονικοποίηση διανυσμάτων σε μοναδιαίο μήκος
+- Βελτιωμένη ομοιότητα συνημιτόνου
+
+### 3. BM25
+- Βελτιστοποιημένες παράμετροι (k1=1.5, b=0.85)
+- Υπολογισμός term proximity για κοντινούς όρους
+- Exact phrase matching με χρήση διγραμμάτων
+- Συνδυασμός σκορ με proximity και phrase bonuses
+
+### 4. Learning to Rank
+- Νέα χαρακτηριστικά:
+  - Category matching (15%): Ταίριασμα κατηγοριών μεταξύ ερωτήματος και άρθρου
+  - Length score (10%): Προτίμηση σε άρθρα 500-5000 λέξεων
+  - Link score (10%): Συνδυασμός εισερχόμενων και εξερχόμενων συνδέσμων
+  - Initial score (25%): Βασικό σκορ αναζήτησης
+  - Title match (20%): Ταίριασμα τίτλου
+  - PageRank (15%): Σημαντικότητα άρθρου
+  - Freshness (5%): Χρονική εγγύτητα
+
+- Βελτιώσεις:
+  - Εξαγωγή κατηγοριών από το ερώτημα
+  - Κανονικοποίηση όλων των σκορ στο [0,1]
+  - Χρήση Jaccard similarity για κατηγορίες
+  - Λογαριθμική κλίμακα για μήκος και συνδέσμους
+
+## Χρήση
+
+[Εδώ διατηρούμε το υπάρχον περιεχόμενο του README...] 

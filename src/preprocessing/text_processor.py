@@ -65,6 +65,14 @@ class TextPreprocessor:
         # Βασική κανονικοποίηση
         text = text.lower()
         
+        # Κανονικοποίηση τόνων
+        accent_map = {
+            'ά': 'α', 'έ': 'ε', 'ή': 'η', 'ί': 'ι', 'ό': 'ο', 'ύ': 'υ', 'ώ': 'ω',
+            'ϊ': 'ι', 'ϋ': 'υ', 'ΐ': 'ι', 'ΰ': 'υ'
+        }
+        for accented, unaccented in accent_map.items():
+            text = text.replace(accented, unaccented)
+        
         # Επιπλέον κανονικοποιήσεις
         replacements = {
             'αι': 'ε',

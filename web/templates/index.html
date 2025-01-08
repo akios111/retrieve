@@ -80,11 +80,6 @@
             font-weight: bold;
             margin-bottom: 5px;
         }
-        .date-filter {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
         .category-filter {
             max-height: 150px;
             overflow-y: auto;
@@ -175,16 +170,7 @@
                     <h5>Φίλτρα Αναζήτησης</h5>
                     
                     <div class="filter-group">
-                        <div class="filter-label">Χρονική Περίοδος</div>
-                        <div class="date-filter">
-                            <input type="date" id="dateFrom" class="form-control">
-                            <span>έως</span>
-                            <input type="date" id="dateTo" class="form-control">
-                        </div>
-                    </div>
-                    
-                    <div class="filter-group">
-                        <div class="filter-label">Κατηγορίες</div>
+                        <div class="filter-label">Χατηγορίες</div>
                         <div class="category-filter">
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" value="Επιστήμη" id="catScience">
@@ -294,8 +280,6 @@
                 
                 const query = $('#query').val().trim();
                 const method = $('input[name="searchMethod"]:checked').val();
-                const dateFrom = $('#dateFrom').val();
-                const dateTo = $('#dateTo').val();
                 const categories = [];
                 
                 $('.category-filter input:checked').each(function() {
@@ -319,8 +303,6 @@
                     data: { 
                         query: query,
                         method: method,
-                        date_from: dateFrom,
-                        date_to: dateTo,
                         categories: JSON.stringify(categories)
                     },
                     success: function(response) {
