@@ -24,4 +24,17 @@ class GreekSpellChecker:
             return [self.check_word(token) for token in tokens]
         except Exception as e:
             print(f"Error in spell checking: {str(e)}")
-            return tokens 
+            return tokens
+            
+    def correct_text(self, text: str) -> str:
+        """Correct spelling in a text string."""
+        try:
+            # Tokenize the text
+            tokens = text.split()
+            # Check spelling of each token
+            corrected_tokens = self.check_text(tokens)
+            # Join tokens back into text
+            return ' '.join(corrected_tokens)
+        except Exception as e:
+            print(f"Error in text correction: {str(e)}")
+            return text 

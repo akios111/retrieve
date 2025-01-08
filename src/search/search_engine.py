@@ -14,6 +14,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from ..preprocessing.text_processor import TextPreprocessor
+from ..preprocessing.greek_embeddings import GreekWordEmbeddings
 
 class SearchEngine:
     def __init__(self):
@@ -30,6 +31,8 @@ class SearchEngine:
             'title_match': 0.1,
             'freshness': 0.1
         }
+        self.embeddings = GreekWordEmbeddings()
+        self.semantic_weight = 0.2  # Μείωση από 0.3 σε 0.2
         
         self._load_resources()
         
@@ -42,7 +45,7 @@ class SearchEngine:
             # Φόρτωση άρθρων
             articles_path = data_dir / 'processed_articles.json'
             logger.info(f"Loading articles from {articles_path}")
-            with open(articles_path, 'r', encoding='utf-8') as f:
+            with open(articles_path, 'r', encoding='utf-8-sig') as f:
                 articles_list = json.load(f)
                 # Μετατροπή λίστας σε λεξικό με κλειδί τον τίτλο
                 self.articles = {article['title']: article for article in articles_list}
@@ -67,7 +70,7 @@ class SearchEngine:
             # Φόρτωση ευρετηρίου
             index_path = data_dir / 'inverted_index.json'
             logger.info(f"Loading index from {index_path}")
-            with open(index_path, 'r', encoding='utf-8') as f:
+            with open(index_path, 'r', encoding='utf-8-sig') as f:
                 self.index = json.load(f)
             logger.info(f"Loaded index with {len(self.index)} terms")
             logger.info(f"Sample index terms: {list(self.index.keys())[:5]}")
@@ -75,7 +78,7 @@ class SearchEngine:
             # Φόρτωση διανυσμάτων εγγράφων
             vectors_path = data_dir / 'document_vectors.json'
             logger.info(f"Loading document vectors from {vectors_path}")
-            with open(vectors_path, 'r', encoding='utf-8') as f:
+            with open(vectors_path, 'r', encoding='utf-8-sig') as f:
                 self.document_vectors = json.load(f)
             logger.info(f"Loaded vectors for {len(self.document_vectors)} documents")
             logger.info(f"Sample document vector keys: {list(self.document_vectors.keys())[:5]}")
@@ -83,7 +86,7 @@ class SearchEngine:
             # Φόρτωση IDF τιμών
             idf_path = data_dir / 'idf_values.json'
             logger.info(f"Loading IDF values from {idf_path}")
-            with open(idf_path, 'r', encoding='utf-8') as f:
+            with open(idf_path, 'r', encoding='utf-8-sig') as f:
                 self.idf = json.load(f)
             logger.info(f"Loaded {len(self.idf)} IDF values")
             logger.info(f"Sample IDF terms: {list(self.idf.keys())[:5]}")
@@ -91,7 +94,7 @@ class SearchEngine:
             # Φόρτωση PageRank scores
             metadata_path = data_dir / 'index_metadata.json'
             logger.info(f"Loading metadata from {metadata_path}")
-            with open(metadata_path, 'r', encoding='utf-8') as f:
+            with open(metadata_path, 'r', encoding='utf-8-sig') as f:
                 metadata = json.load(f)
                 self.pagerank_scores = metadata.get('pagerank_scores', {})
             logger.info(f"Loaded {len(self.pagerank_scores)} PageRank scores")
@@ -103,78 +106,97 @@ class SearchEngine:
             
     def search(self, query: str, method: str = 'vsm', k: int = 10, categories: List[str] = None, date_from: str = None, date_to: str = None) -> List[Tuple[str, float]]:
         """
-        Εκτέλεση αναζήτησης με την επιλεγμένη μέθοδο.
+        Εκτέλεση αναζήτησης με την επιλεγμένη μέθοδο και semantic search.
         """
         try:
+            # Αρχική αναζήτηση με την επιλεγμένη μέθοδο
+            initial_results = []
             if method == 'boolean':
-                results = self.boolean_search(query)
+                initial_results = self.boolean_search(query)
             elif method == 'vsm':
-                results = self.vsm_search(query)
+                initial_results = self.vsm_search(query)
             elif method == 'bm25':
-                results = self.bm25_search(query)
+                initial_results = self.bm25_search(query)
             else:
                 raise ValueError(f"Μη έγκυρη μέθοδος αναζήτησης: {method}")
-            
-            logger.info(f"Αρχικά αποτελέσματα πριν το φιλτράρισμα: {len(results)}")
-            if categories:
-                logger.info(f"Φίλτρο κατηγοριών: {categories}")
-            
-            # Φιλτράρισμα αποτελεσμάτων
-            filtered_results = []
-            for doc_id, score in results:
-                article = self.articles.get(doc_id)
-                if not article:
-                    continue
-                    
-                # Φιλτράρισμα με βάση τις κατηγορίες
-                if categories:
-                    article_categories = article.get('categories', [])
-                    logger.info(f"Άρθρο '{doc_id}' - κατηγορίες: {article_categories}")
-                    if not any(cat in article_categories for cat in categories):
-                        logger.info(f"Το άρθρο '{doc_id}' απορρίφθηκε - δεν ταιριάζει με τις κατηγορίες")
-                        continue
-                    else:
-                        logger.info(f"Το άρθρο '{doc_id}' γινε δεκτό - ταιριάζει με τις κατηγορίες")
-                        
-                # Φιλτράρισμα με βάση την ημερομηνία
-                if date_from or date_to:
-                    article_date = article.get('date', '')
-                    if article_date:
-                        article_date = datetime.strptime(article_date, '%Y-%m-%d')
-                        if date_from:
-                            from_date = datetime.strptime(date_from, '%Y-%m-%d')
-                            if article_date < from_date:
-                                continue
-                        if date_to:
-                            to_date = datetime.strptime(date_to, '%Y-%m-%d')
-                            if article_date > to_date:
-                                continue
-                            
-                filtered_results.append((doc_id, score))
                 
-            logger.info(f"Τελικά αποτελέσματα μετά το φιλτράρισμα: {len(filtered_results)}")
+            # Semantic search
+            documents = {doc_id: self.articles[doc_id].get('text', '') for doc_id, _ in initial_results}
+            semantic_results = self.embeddings.semantic_search(query, documents, top_k=len(documents))
             
-            # Εφαρμογή Learning to Rank
-            ranked_results = self.apply_learning_to_rank(query, filtered_results)
+            # Συνδυασμός scores
+            combined_scores = {}
+            max_initial_score = max((score for _, score in initial_results), default=1.0)
+            max_semantic_score = max((score for _, score in semantic_results), default=1.0)
             
-            # Επιστροφή των top-k αποτελεσμάτων
-            return ranked_results[:k]
+            # Κανονικοποίηση και συνδυασμός scores
+            for doc_id, score in initial_results:
+                normalized_score = score / max_initial_score
+                combined_scores[doc_id] = (1 - self.semantic_weight) * normalized_score
+                
+            for doc_id, score in semantic_results:
+                normalized_score = score / max_semantic_score
+                if doc_id in combined_scores:
+                    combined_scores[doc_id] += self.semantic_weight * normalized_score
+                else:
+                    combined_scores[doc_id] = self.semantic_weight * normalized_score
+            
+            # Ταξινόμηση τελικών αποτελεσμάτων
+            final_results = [(doc_id, score) for doc_id, score in combined_scores.items()]
+            final_results.sort(key=lambda x: x[1], reverse=True)
+            
+            # Φιλτράρισμα με βάση κατηγορίες και ημερομηνίες
+            filtered_results = self._apply_filters(final_results, categories, date_from, date_to)
+            
+            return filtered_results[:k]
             
         except Exception as e:
-            logger.error(f"Error in search: {str(e)}")
+            self.logger.error(f"Error in search: {str(e)}")
             return []
+            
+    def _apply_filters(self, results: List[Tuple[str, float]], categories: List[str] = None, date_from: str = None, date_to: str = None) -> List[Tuple[str, float]]:
+        """Εφαρμογή φίλτρων στα αποτελέσματα."""
+        filtered_results = []
+        
+        for doc_id, score in results:
+            article = self.articles.get(doc_id)
+            if not article:
+                continue
+                
+            # Φιλτράρισμα με βάση τις κατηγορίες
+            if categories:
+                article_categories = article.get('categories', [])
+                if not any(cat in article_categories for cat in categories):
+                    continue
+                    
+            # Φιλτράρισμα με βάση την ημερομηνία
+            if date_from or date_to:
+                article_date = article.get('date', '')
+                if article_date:
+                    article_date = datetime.strptime(article_date, '%Y-%m-%d')
+                    if date_from:
+                        from_date = datetime.strptime(date_from, '%Y-%m-%d')
+                        if article_date < from_date:
+                            continue
+                    if date_to:
+                        to_date = datetime.strptime(date_to, '%Y-%m-%d')
+                        if article_date > to_date:
+                            continue
+                            
+            filtered_results.append((doc_id, score))
+            
+        return filtered_results
             
     def boolean_search(self, query: str) -> List[Tuple[str, float]]:
         """
-        Εκτέλεση Boolean αναζήτησης με υποστήριξη σύνθετων εκφράσεων και fuzzy matching.
-        Υποστηρίζει τους τελεστές: AND (&&), OR (||), NOT (!).
+        Εελτιωμένη Boolean αναζήτηση με καλύτερο χειρισμό τελεστών και fuzzy matching.
         """
         try:
-            # Επεξεργασία του ερωτήματος
+            # Προεπεξεργασία του ερωτήματος
             query = query.replace('&&', ' AND ').replace('||', ' OR ').replace('!', ' NOT ')
             tokens = query.split()
             
-            # Στοίβα για τα ενδιάμεσα αποτελέσματα
+            # Στοίβες για τελεστές και αποτελέσματα
             results_stack = []
             operators_stack = []
             
@@ -183,76 +205,117 @@ class SearchEngine:
                 token = tokens[i]
                 
                 if token in ('AND', 'OR', 'NOT'):
+                    # Χειρισμός προτεραιότητας τελεστών
+                    while (operators_stack and 
+                          operators_stack[-1] != '(' and 
+                          self._get_operator_precedence(operators_stack[-1]) >= self._get_operator_precedence(token)):
+                        self._apply_operator(operators_stack, results_stack)
                     operators_stack.append(token)
-                else:
-                    # Εύρεση εγγράφων για τον τρέχοντα όρο με fuzzy matching
-                    term_docs = set()
-                    processed_term = self.text_processor.clean_text(token)
-                    term_tokens = self.text_processor.tokenize_and_remove_stopwords(processed_term)
-                    
-                    for term in term_tokens:
-                        # Ακριβές ταίριασμα
-                        if term in self.index:
-                            term_docs.update(self.index[term])
-                            
-                        # Fuzzy matching για παρόμοιους όρους
-                        similar_terms = self._find_similar_terms(term)
-                        for similar_term in similar_terms:
-                            if similar_term in self.index:
-                                term_docs.update(self.index[similar_term])
-                    
-                    # Εφαρμογή NOT αν υπάρχει
-                    if operators_stack and operators_stack[-1] == 'NOT':
-                        all_docs = set(self.articles.keys())
-                        term_docs = all_docs - term_docs
+                elif token == '(':
+                    operators_stack.append(token)
+                elif token == ')':
+                    while operators_stack and operators_stack[-1] != '(':
+                        self._apply_operator(operators_stack, results_stack)
+                    if operators_stack and operators_stack[-1] == '(':
                         operators_stack.pop()
-                    
+                else:
+                    # Εύρεση εγγράφων για τον τρέχοντα όρο
+                    term_docs = self._get_matching_docs(token)
                     results_stack.append(term_docs)
-                    
-                    # Εφαρμογή AND/OR αν υπάρχουν δύο σύνολα αποτελεσμάτων
-                    while len(results_stack) >= 2 and operators_stack and operators_stack[-1] in ('AND', 'OR'):
-                        op = operators_stack.pop()
-                        set2 = results_stack.pop()
-                        set1 = results_stack.pop()
-                        
-                        if op == 'AND':
-                            results_stack.append(set1 & set2)
-                        else:  # OR
-                            results_stack.append(set1 | set2)
                 
                 i += 1
             
-            # Μετατροπή του τελικού συνόλου σε λίστα με σκορ
-            final_results = []
-            if results_stack:
-                final_docs = results_stack[-1]
-                for doc_id in final_docs:
-                    # Υπολογισμός σκορ με βάση το πόσο καλά ταιριάζουν οι όροι
-                    score = self._calculate_boolean_score(doc_id, query)
-                    final_results.append((doc_id, score))
+            # Εφαρμογή εναπομείναντων τελεστών
+            while operators_stack:
+                self._apply_operator(operators_stack, results_stack)
             
-            return sorted(final_results, key=lambda x: x[1], reverse=True)
+            # Μετατροπή του τελικού συνόλου σε λίστα με σκορ
+            if not results_stack:
+                return []
+                
+            final_docs = results_stack[0]
+            return [(doc_id, 1.0) for doc_id in final_docs]
             
         except Exception as e:
-            logger.error(f"Error in boolean search: {str(e)}")
+            self.logger.error(f"Error in boolean search: {str(e)}")
             return []
             
-    def _find_similar_terms(self, term: str, max_distance: int = 2) -> Set[str]:
+    def _get_operator_precedence(self, op: str) -> int:
+        """Επιστρέφει την προτεραιότητα του τελεστή."""
+        precedence = {
+            'NOT': 3,
+            'AND': 2,
+            'OR': 1
+        }
+        return precedence.get(op, 0)
+        
+    def _apply_operator(self, operators_stack: List[str], results_stack: List[Set[str]]):
+        """Εφαρμόζει τον τελεστή στα αποτελέσματα."""
+        if not operators_stack:
+            return
+            
+        op = operators_stack.pop()
+        if op == 'NOT':
+            if results_stack:
+                docs = results_stack.pop()
+                all_docs = set(self.articles.keys())
+                results_stack.append(all_docs - docs)
+        else:  # AND ή OR
+            if len(results_stack) >= 2:
+                docs2 = results_stack.pop()
+                docs1 = results_stack.pop()
+                if op == 'AND':
+                    results_stack.append(docs1 & docs2)
+                else:  # OR
+                    results_stack.append(docs1 | docs2)
+                    
+    def _get_matching_docs(self, term: str) -> Set[str]:
+        """Βρίσκει τα έγγραφα που ταιριάζουν με τον όρο, συμπεριλαμβανομένου fuzzy matching."""
+        matching_docs = set()
+        
+        # Επεξεργασία του όρου
+        processed_term = self.text_processor.clean_text(term)
+        term_tokens = self.text_processor.tokenize_and_remove_stopwords(processed_term)
+        
+        for token in term_tokens:
+            # Ακριβές ταίριασμα
+            if token in self.index:
+                matching_docs.update(self.index[token].keys())
+            
+            # Fuzzy matching με βελτιωμένο threshold
+            similar_terms = self._find_similar_terms(token, threshold=0.8)
+            for similar_term in similar_terms:
+                if similar_term in self.index:
+                    matching_docs.update(self.index[similar_term].keys())
+                    
+            # Έλεγχος για ταίριασμα στον τίτλο (με μεγαλύτερο βάρος)
+            for doc_id in self.articles:
+                if token.lower() in self.articles[doc_id]['title'].lower():
+                    matching_docs.add(doc_id)
+                    
+        return matching_docs
+        
+    def _find_similar_terms(self, term: str, threshold: float = 0.8) -> Set[str]:
         """Εύρεση παρόμοιων όρων με βάση την απόσταση Levenshtein."""
         similar_terms = set()
-        for index_term in self.index.keys():
-            if self._levenshtein_distance(term, index_term) <= max_distance:
+        
+        # Έλεγχος όλων των όρων στο ευρετήριο
+        for index_term in self.index:
+            # Υπολογισμός ομοιότητας με βάση την απόσταση Levenshtein
+            similarity = self._levenshtein_similarity(term, index_term)
+            if similarity >= threshold:
                 similar_terms.add(index_term)
+                
         return similar_terms
         
-    def _levenshtein_distance(self, s1: str, s2: str) -> int:
-        """Υπολογισμός της απόστασης Levenshtein μεταξύ δύο strings."""
+    def _levenshtein_similarity(self, s1: str, s2: str) -> float:
+        """Υπολογισμός ομοιότητας με βάση την απόσταση Levenshtein."""
         if len(s1) < len(s2):
-            return self._levenshtein_distance(s2, s1)
-        
+            return self._levenshtein_similarity(s2, s1)
+            
         if len(s2) == 0:
-            return len(s1)
-        
+            return 0.0
+            
         previous_row = range(len(s2) + 1)
         for i, c1 in enumerate(s1):
             current_row = [i + 1]
@@ -262,8 +325,13 @@ class SearchEngine:
                 substitutions = previous_row[j] + (c1 != c2)
                 current_row.append(min(insertions, deletions, substitutions))
             previous_row = current_row
+            
+        # Κανονικοποίηση της απόστασης στο διάστημα [0,1]
+        max_length = max(len(s1), len(s2))
+        distance = previous_row[-1]
+        similarity = 1 - (distance / max_length)
         
-        return previous_row[-1]
+        return similarity
         
     def _calculate_boolean_score(self, doc_id: str, query: str) -> float:
         """Υπολογισμός σκορ για boolean αναζήτηση με βάση την ποιότητα του ταιριάσματος."""
@@ -281,7 +349,7 @@ class SearchEngine:
             exact_matches = len(query_terms & doc_terms)
             fuzzy_matches = sum(1 for qt in query_terms 
                               for dt in doc_terms 
-                              if self._levenshtein_distance(qt, dt) <= 2)
+                              if self._levenshtein_similarity(qt, dt) >= 0.8)
             
             title_boost = 1.5 if any(qt in article['title'].lower() for qt in query_terms) else 1.0
             
@@ -336,7 +404,7 @@ class SearchEngine:
         
         for term in terms:
             # Προσθήκη παρόμοιων όρων με βάση Levenshtein
-            similar_terms = self._find_similar_terms(term, max_distance=1)
+            similar_terms = self._find_similar_terms(term, threshold=0.8)
             expanded_terms.extend(list(similar_terms))
             
             # Προσθήκη συχνά συνεμφανιζόμενων όρων
@@ -352,7 +420,7 @@ class SearchEngine:
         
         if term in self.index:
             # Για κάθε έγγραφο που περιέχει τον όρο
-            for doc_id in self.index[term]:
+            for doc_id in self.index[term].keys():
                 if doc_id in self.document_vectors:
                     # Βρες τους όρους με τη μεγαλύτερη TF-IDF τιμή
                     doc_terms = sorted(
@@ -405,47 +473,80 @@ class SearchEngine:
         """Εκτέλεση BM25 αναζήτησης με βελτιωμένες παραμέτρους και term proximity."""
         try:
             # Βελτιστοποιημένες παράμετροι BM25
-            k1 = 1.5  # Υψηλότερο k1 για μεγαλύτερη επιρροή του term frequency
-            b = 0.85  # Υψηλότερο b για μεγαλύτερη κανονικοποίηση μήκους
+            k1 = 1.2  # Παράμετρος term frequency saturation
+            b = 0.75  # Παράμετρος μήκους εγγράφου
             
             # Επεξεργασία του ερωτήματος
             processed_query = self.text_processor.clean_text(query)
             query_terms = self.text_processor.tokenize_and_remove_stopwords(processed_query)
             
+            if not query_terms:
+                return []
+            
+            # Υπολογισμός term frequencies και μήκους εγγράφων
+            doc_term_freqs = {}
+            doc_lengths = {}
+            total_docs = len(self.articles)
+            
+            # Υπολογισμός document frequencies
+            doc_freqs = defaultdict(int)
+            for doc_id, article in self.articles.items():
+                text = article['title'] + ' ' + article.get('text', '')
+                processed_text = self.text_processor.clean_text(text)
+                tokens = self.text_processor.tokenize_and_remove_stopwords(processed_text)
+                
+                # Υπολογισμός term frequencies για το έγγραφο
+                term_freqs = defaultdict(int)
+                for token in tokens:
+                    term_freqs[token] += 1
+                
+                # Ενημέρωση document frequencies
+                doc_terms = set(tokens)
+                for term in doc_terms:
+                    doc_freqs[term] += 1
+                
+                doc_term_freqs[doc_id] = term_freqs
+                doc_lengths[doc_id] = len(tokens)
+            
             # Υπολογισμός μέσου μήκους εγγράφων
-            doc_lengths = {doc_id: sum(vector.values()) for doc_id, vector in self.document_vectors.items()}
             avg_doc_len = np.mean(list(doc_lengths.values()))
             
-            # Αρχικοποίηση σκορ
-            scores = defaultdict(float)
+            # Υπολογισμός BM25 IDF
+            idfs = {}
+            for term in query_terms:
+                df = doc_freqs.get(term, 0)
+                if df > 0:
+                    idfs[term] = np.log((total_docs - df + 0.5) / (df + 0.5))
+                else:
+                    idfs[term] = 0
             
             # Υπολογισμός BM25 σκορ για κάθε έγγραφο
-            for doc_id, doc_vector in self.document_vectors.items():
+            scores = defaultdict(float)
+            for doc_id, term_freqs in doc_term_freqs.items():
                 doc_len = doc_lengths[doc_id]
+                doc_score = 0
                 
-                # Υπολογισμός βασικού BM25 σκορ
-                bm25_score = 0
                 for term in query_terms:
-                    if term in doc_vector:
-                        tf = doc_vector[term]
-                        idf = self.idf.get(term, 0)
+                    if term in term_freqs and term in idfs:
+                        tf = term_freqs[term]
+                        idf = idfs[term]
                         
-                        # Κλασικός τύπος BM25
-                        numerator = tf * (k1 + 1)
-                        denominator = tf + k1 * (1 - b + b * doc_len / avg_doc_len)
-                        term_score = idf * numerator / denominator
+                        # BM25 term frequency component
+                        tf_component = ((k1 + 1) * tf) / (k1 * (1 - b + b * doc_len / avg_doc_len) + tf)
                         
-                        bm25_score += term_score
+                        # Πρόσθετο βάρος για όρους στον τίτλο
+                        title_boost = 1.0
+                        if term in self.articles[doc_id]['title'].lower():
+                            title_boost = 1.5
+                        
+                        doc_score += idf * tf_component * title_boost
                 
-                if bm25_score > 0:
+                if doc_score > 0:
                     # Υπολογισμός proximity bonus
                     proximity_score = self._calculate_term_proximity(query_terms, doc_id)
                     
-                    # Υπολογισμός exact phrase bonus
-                    phrase_score = self._calculate_exact_phrase_matches(query, doc_id)
-                    
                     # Συνδυασμός σκορ
-                    final_score = bm25_score * (1 + 0.1 * proximity_score + 0.2 * phrase_score)
+                    final_score = doc_score * (1 + 0.1 * proximity_score)
                     scores[doc_id] = float(final_score)
             
             # Ταξινόμηση και επιστροφή αποτελεσμάτων

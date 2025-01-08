@@ -5,6 +5,8 @@ from typing import List, Dict, Set, Tuple
 from collections import defaultdict
 import numpy as np
 from datetime import datetime
+import sys
+sys.path.append(str(Path(__file__).parent.parent.parent))
 from src.search.search_engine import SearchEngine
 
 class SearchEvaluator:

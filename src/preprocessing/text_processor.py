@@ -33,7 +33,7 @@ class TextPreprocessor:
         self.stopwords = set(stopwords.words('greek'))
         
         # Initialize components with local model path
-        model_path = os.path.join('models', 'greek-bert')
+        model_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'models', 'greek-bert'))
         self.spell_checker = GreekSpellChecker(model_path=model_path)
         self.embeddings = GreekWordEmbeddings(model_path=model_path)
         self.ner = GreekNER(model_path=model_path)
@@ -42,19 +42,27 @@ class TextPreprocessor:
     def tokenize_greek_text(self, text: str) -> List[str]:
         """Tokenization ελληνικού κειμένου."""
         try:
-            # Καθαρισμός και κανονικοποίηση
-            text = text.lower()
+            # Καθαρισμός χωρίς να αφαιρούμε τόνους
+            text = text.strip()
             
-            # Αφαίρεση ειδικών χαρακτήρων αλλά διατήρηση γραμμάτων και αριθμών
-            text = re.sub(r'[^Α-Ωα-ωίϊΐόάέύϋΰήώ\s\d]', ' ', text)
+            # Αφαίρεση ειδικών χαρακτήρων διατηρώντας ελληνικούς χαρακτήρες και σημεία στίξης
+            text = re.sub(r'[^\u0370-\u03FF\u1F00-\u1FFF.,!;()[\]{}\s\d]', ' ', text)
             
-            # Χρήση απλού tokenizer για διαχωρισμό λέξεων
-            tokens = text.split()
+            # Διατήρηση μόνο των απαραίτητων σημείων στίξης
+            text = re.sub(r'[.,!;](?=[^\s])', ' ', text)  # Προσθήκη κενού μετά τα σημεία στίξης
             
-            # Φιλτράρισμα για να κρατήσουμε μόνο έγκυρα tokens
-            tokens = [token for token in tokens if any('\u0370' <= c <= '\u03FF' for c in token)]
+            # Tokenization με το NLTK
+            tokens = word_tokenize(text, language='greek')
             
-            return tokens
+            # Φιλτράρισμα για έγκυρα tokens (τουλάχιστον ένας ελληνικός χαρακτήρας)
+            valid_tokens = []
+            for token in tokens:
+                if any('\u0370' <= c <= '\u03FF' or '\u1F00' <= c <= '\u1FFF' for c in token):
+                    valid_tokens.append(token)
+                elif token.isdigit() or token in string.punctuation:
+                    valid_tokens.append(token)
+            
+            return valid_tokens
             
         except Exception as e:
             self.logger.error(f"Σφάλμα κατά το tokenization: {str(e)}")
@@ -62,33 +70,29 @@ class TextPreprocessor:
             
     def normalize_greek_text(self, text: str) -> str:
         """Εκτεταμένη κανονικοποίηση ελληνικού κειμένου."""
-        # Βασική κανονικοποίηση
-        text = text.lower()
-        
-        # Κανονικοποίηση τόνων
-        accent_map = {
-            'ά': 'α', 'έ': 'ε', 'ή': 'η', 'ί': 'ι', 'ό': 'ο', 'ύ': 'υ', 'ώ': 'ω',
-            'ϊ': 'ι', 'ϋ': 'υ', 'ΐ': 'ι', 'ΰ': 'υ'
-        }
-        for accented, unaccented in accent_map.items():
-            text = text.replace(accented, unaccented)
-        
-        # Επιπλέον κανονικοποιήσεις
-        replacements = {
-            'αι': 'ε',
-            'ει': 'ι',
-            'οι': 'ι',
-            'υι': 'ι',
-            'ου': 'υ',
-            'αυ': 'αβ',
-            'ευ': 'εβ'
-        }
-        
-        for old, new in replacements.items():
-            text = text.replace(old, new)
-        
-        return text
-        
+        try:
+            # Μετατροπή σε πεζά
+            text = text.lower().strip()
+            
+            # Κανονικοποίηση τόνων και διαλυτικών
+            accent_map = {
+                'ά': 'α', 'έ': 'ε', 'ή': 'η', 'ί': 'ι', 'ό': 'ο', 'ύ': 'υ', 'ώ': 'ω',
+                'ἀ': 'α', 'ἐ': 'ε', 'ἠ': 'η', 'ἰ': 'ι', 'ὀ': 'ο', 'ὐ': 'υ', 'ὠ': 'ω',
+                'ϊ': 'ι', 'ϋ': 'υ', 'ΐ': 'ι', 'ΰ': 'υ'
+            }
+            
+            for accented, unaccented in accent_map.items():
+                text = text.replace(accented, unaccented)
+            
+            # Αφαίρεση πολλαπλών κενών
+            text = ' '.join(text.split())
+            
+            return text
+            
+        except Exception as e:
+            self.logger.error(f"Σφάλμα κατά την κανονικοποίηση: {str(e)}")
+            return text
+            
     def validate_greek_text(self, text: str) -> bool:
         """Έλεγχος εγκυρότητας ελληνικού κειμένου."""
         if not text or not isinstance(text, str):
@@ -117,44 +121,85 @@ class TextPreprocessor:
         self.stopwords.update(frequent_words)
         
     def clean_text(self, text: str) -> str:
-        """Καθαρισμός κειμένου."""
-        # Αφαίρεση HTML tags
-        text = re.sub(r'<[^>]+>', '', text)
+        """Καθαρισμός και προετοιμασία κειμένου."""
+        try:
+            if not self.validate_greek_text(text):
+                return ""
+            
+            # Αρχικός καθαρισμός
+            text = text.strip()
+            
+            # Tokenization
+            tokens = self.tokenize_greek_text(text)
+            
+            # Κανονικοποίηση κάθε token
+            normalized_tokens = [self.normalize_greek_text(token) for token in tokens]
+            
+            # Επανένωση των tokens
+            cleaned_text = ' '.join(normalized_tokens)
+            
+            # Διόρθωση ορθογραφίας αν χρειάζεται
+            if len(cleaned_text) > 0:
+                cleaned_text = self.spell_checker.correct_text(cleaned_text)
+            
+            return cleaned_text
+            
+        except Exception as e:
+            self.logger.error(f"Σφάλμα κατά τον καθαρισμό κειμένου: {str(e)}")
+            return ""
         
-        # Αφαίρεση URLs
-        text = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '', text)
+    def assign_categories(self, text: str) -> List[str]:
+        """Ανάθεση κατηγοριών με βάση το περιεχόμενο του άρθρου."""
+        categories = []
+        text = text.lower()
         
-        # Διατήρηση ελληνικών χαρακτήρων, αριθμών και βασικών σημείων στίξης
-        text = re.sub(r'[^Α-Ωα-ωίϊΐόάέύϋΰήώ\s\d.,!?]', ' ', text)
+        # Λέξεις-κλειδιά για κάθε κατηγορία
+        category_keywords = {
+            'Επιστήμη': ['επιστήμη', 'επιστημονικ', 'έρευνα', 'πείραμα', 'εργαστήριο', 'θεωρία', 'μέθοδος', 'ανακάλυψη'],
+            'Ιστορία': ['ιστορία', 'ιστορικ', 'εποχή', 'περίοδος', 'αρχαί', 'μεσαίων', 'πόλεμος', 'αυτοκράτορας', 'βασιλιάς'],
+            'Τέχνη': ['τέχνη', 'καλλιτέχν', 'έργο', 'μουσείο', 'γλυπτ', 'ζωγραφ', 'αρχιτεκτονικ', 'μουσική'],
+            'Φιλοσοφία': ['φιλοσοφία', 'φιλόσοφος', 'σκέψη', 'λογική', 'ηθική', 'γνώση', 'οντολογία', 'επιστημολογία'],
+            'Τεχνολογία': ['τεχνολογία', 'υπολογιστ', 'μηχαν', 'συσκευ', 'εφεύρεση', 'καινοτομία', 'ψηφιακ', 'διαδίκτυο']
+        }
         
-        # Κανονικοποίηση
-        text = self.normalize_greek_text(text)
-        
-        # Αφαίρεση πολλαπλών κενών
-        text = re.sub(r'\s+', ' ', text)
-        
-        return text.strip()
-        
+        # Έλεγχος για κάθε κατηγορία
+        for category, keywords in category_keywords.items():
+            if any(keyword in text for keyword in keywords):
+                categories.append(category)
+                
+        return categories
+
     def process_article(self, article: Dict) -> Optional[Dict]:
         """Ασφαλής επεξεργασία με χειρισμό σφαλμάτων."""
         try:
+            self.logger.info(f"Αρχή επεξεργασίας άρθρου: {article['title']}")
+            
             if not self.validate_greek_text(article['text']):
                 self.logger.warning(f"Το άρθρο {article['title']} δεν περιέχει έγκυρο ελληνικό κείμενο")
                 return None
                 
             # Καθαρισμός κειμένου - βασική επεξεργασία
+            self.logger.info("Καθαρισμός κειμένου...")
             cleaned_text = self.clean_text(article['text'])
-            tokens = self.tokenize_greek_text(cleaned_text)
+            self.logger.debug(f"Καθαρισμένο κείμενο (πρώτοι 100 χαρακτήρες): {cleaned_text[:100]}")
             
-            # Βπεξεργασία tokens
+            self.logger.info("Tokenization...")
+            tokens = self.tokenize_greek_text(cleaned_text)
+            self.logger.debug(f"Πρώτα 10 tokens: {tokens[:10]}")
+            
+            # Επεξεργασία tokens
             if hasattr(self, 'spell_checker'):
+                self.logger.info("Διόρθωση ορθογραφίας...")
                 tokens = self.spell_checker.check_text(tokens)
             
             if hasattr(self, 'stopwords'):
+                self.logger.info("Αφαίρεση stopwords...")
                 tokens = [t for t in tokens if t not in self.stopwords]
             
-            # Lemmatization μετά την αφαίρεση stopwords
-            lemmatized = self.lemmatize_tokens(tokens)
+            # Ανάθεση κατηγοριών
+            self.logger.info("Ανάθεση κατηγοριών...")
+            categories = self.assign_categories(cleaned_text)
+            self.logger.info(f"Κατηγορίες που ανατέθηκαν: {categories}")
             
             # Βασικά μεταδεδομένα
             processed = {
@@ -162,7 +207,7 @@ class TextPreprocessor:
                 'text': article['text'],
                 'clean_text': cleaned_text,
                 'tokens': tokens,
-                'lemmatized_tokens': lemmatized,
+                'categories': categories,
                 'metadata': {
                     'processing_date': datetime.now().isoformat(),
                     'word_count': len(tokens),
@@ -174,36 +219,31 @@ class TextPreprocessor:
             }
             
             # Προαιρετική επεξεργασία
-            if hasattr(self, 'embeddings'):
-                processed['expanded_tokens'] = self.expand_tokens_with_synonyms(lemmatized)
-            
             if hasattr(self, 'ner'):
+                self.logger.info("Εξαγωγή οντοτήτων...")
                 processed['metadata']['entities'] = self.ner.extract_entities(cleaned_text)
                 
             if hasattr(self, 'sentiment'):
+                self.logger.info("Ανάλυση συναισθήματος...")
                 processed['metadata']['sentiment'] = self.sentiment.analyze_sentiment(cleaned_text)
             
+            self.logger.info(f"Ολοκλήρωση επεξεργασίας άρθρου: {article['title']}")
             return processed
             
         except Exception as e:
             self.logger.error(f"Σφάλμα κατά την επεξεργασία του άρθρου {article['title']}: {str(e)}")
             return None
     
-    def load_articles(self, data_dir: str = 'data') -> List[Dict]:
-        """Φόρτωση όλων των άρθρων από τα JSON αρχεία."""
-        articles = []
-        data_path = Path(data_dir)
-        
-        for json_file in data_path.glob('wikipedia_articles_*.json'):
-            try:
-                with open(json_file, 'r', encoding='utf-8') as f:
-                    category_articles = json.load(f)
-                    articles.extend(category_articles)
-                    self.logger.info(f'Φορτώθηκαν {len(category_articles)} άρθρα από {json_file.name}')
-            except Exception as e:
-                self.logger.error(f'Σφάλμα κατά τη φόρτωση του {json_file}: {str(e)}')
-                
-        return articles
+    def load_articles(self, input_file: str = 'data/articles.json') -> List[Dict]:
+        """Φόρτωση των άρθρων."""
+        try:
+            with open(input_file, 'r', encoding='utf-8-sig') as f:
+                articles = json.load(f)
+            self.logger.info(f'Φορτώθηκαν {len(articles)} άρθρα από το {input_file}')
+            return articles
+        except Exception as e:
+            self.logger.error(f'Σφάλμα κατά τη φόρτωση των άρθρων: {str(e)}')
+            return []
     
     def process_all_articles(self, articles: List[Dict]) -> List[Dict]:
         """Επεξεργασία όλων των άρθρων."""
@@ -220,10 +260,11 @@ class TextPreprocessor:
     def save_processed_articles(self, processed_articles: List[Dict], output_file: str = 'data/processed_articles.json'):
         """Αποθήκευση των επεξεργασμένων άρθρων."""
         try:
-            # Δημιουργία του directory αν δεν υπάρχει
+            # Ensure the data directory exists
             os.makedirs(os.path.dirname(output_file), exist_ok=True)
             
-            with open(output_file, 'w', encoding='utf-8') as f:
+            # Save with UTF-8 encoding and BOM
+            with open(output_file, 'w', encoding='utf-8-sig') as f:
                 json.dump(processed_articles, f, ensure_ascii=False, indent=2)
             self.logger.info(f'Αποθηκεύτηκαν {len(processed_articles)} επεξεργασμένα άρθρα στο {output_file}')
         except Exception as e:
@@ -241,14 +282,21 @@ class TextPreprocessor:
         
     def expand_tokens_with_synonyms(self, tokens: List[str]) -> List[str]:
         """Επέκταση των tokens με συνώνυμα."""
-        expanded_tokens = []
+        expanded_tokens = set(tokens)
+        
+        # Χρήση των tokens ως vocabulary
+        vocabulary = list(set(tokens))
+        
         for token in tokens:
-            # Προσθήκη του αρχικού token
-            expanded_tokens.append(token)
-            # Προσθήκη συνωνύμων από το word embeddings model
-            similar_words = self.embeddings.find_similar_words(token)
-            expanded_tokens.extend(similar_words)
-        return expanded_tokens
+            try:
+                # Εύρεση παρόμοιων λέξεων από το vocabulary
+                similar_words = self.embeddings.find_similar_words(token, vocabulary=vocabulary, n=3)
+                expanded_tokens.update(word for word, score in similar_words if score > 0.7)
+            except Exception as e:
+                self.logger.warning(f"Error finding similar words for {token}: {str(e)}")
+                continue
+                
+        return list(expanded_tokens)
         
     def lemmatize_tokens(self, tokens: List[str]) -> List[str]:
         """Lemmatization των tokens."""

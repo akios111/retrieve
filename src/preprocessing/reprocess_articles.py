@@ -1,81 +1,70 @@
-from text_processor import TextPreprocessor
-import logging
-from typing import List, Dict, Any
-from pathlib import Path
 import json
+import logging
+from pathlib import Path
+from datetime import datetime
+from text_processor import TextPreprocessor
+from typing import List, Dict
 
 # Ρύθμιση logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-def assign_categories(text: str) -> List[str]:
-    """Ανάθεση κατηγοριών με βάση το περιεχόμενο του άρθρου."""
-    categories = []
-    text = text.lower()
-    
-    # Λέξεις-κλειδιά για κάθε κατηγορία
-    category_keywords = {
-        'Επιστήμη': ['επιστήμη', 'επιστημονικ', 'έρευνα', 'πείραμα', 'εργαστήριο', 'θεωρία', 'μέθοδος', 'ανακάλυψη'],
-        'Ιστορία': ['ιστορία', 'ιστορικ', 'εποχή', 'περίοδος', 'αρχαί', 'μεσαίων', 'πόλεμος', 'αυτοκράτορας', 'βασιλιάς'],
-        'Τέχνη': ['τέχνη', 'καλλιτέχν', 'έργο', 'μουσείο', 'γλυπτ', 'ζωγραφ', 'αρχιτεκτονικ', 'μουσική'],
-        'Φιλοσοφία': ['φιλοσοφία', 'φιλόσοφος', 'σκέψη', 'λογική', 'ηθική', 'γνώση', 'οντολογία', 'επιστημολογία'],
-        'Τεχνολογία': ['τεχνολογία', 'υπολογιστ', 'μηχαν', 'συσκευ', 'εφεύρεση', 'καινοτομία', 'ψηφιακ', 'διαδίκτυο']
-    }
-    
-    # Έλεγχος για κάθε κατηγορία
-    for category, keywords in category_keywords.items():
-        if any(keyword in text for keyword in keywords):
-            categories.append(category)
-            
-    return categories
-
-def main():
+def reprocess_articles():
+    """Επανεπεξεργασία των άρθρων με τον ενημερωμένο TextPreprocessor."""
     try:
-        # Φόρτωση των άρθρων
+        # Αρχικοποίηση του text processor
+        processor = TextPreprocessor()
+        
+        # Φόρτωση των αρχικών άρθρων
         data_dir = Path(__file__).parent.parent.parent / 'data'
         articles = []
         
-        # Διάβασμα όλων των αρχείων JSON
-        for json_file in data_dir.glob('wikipedia_articles_*.json'):
-            logger.info(f"Loading articles from {json_file}")
-            with open(json_file, 'r', encoding='utf-8') as f:
-                file_articles = json.load(f)
-                articles.extend(file_articles)
-                
-        logger.info(f"Loaded {len(articles)} articles")
+        # Φόρτωση όλων των αρχείων άρθρων
+        for file_path in data_dir.glob('wikipedia_articles_*.json'):
+            if file_path.name != 'wikipedia_articles.json':  # Αποφυγή του συγκεντρωτικού αρχείου
+                logger.info(f"Loading articles from {file_path}")
+                with open(file_path, 'r', encoding='utf-8-sig') as f:
+                    file_articles = json.load(f)
+                    if isinstance(file_articles, list):
+                        articles.extend(file_articles)
+                    else:
+                        articles.append(file_articles)
+        
+        logger.info(f"Loaded {len(articles)} articles for processing")
         
         # Επεξεργασία των άρθρων
-        text_processor = TextPreprocessor()
         processed_articles = []
-        
         for article in articles:
-            title = article.get('title', '')
-            text = article.get('text', '')
-            date = article.get('date', '')
-            
-            # Ανάθεση κατηγοριών
-            categories = assign_categories(text)
-            logger.info(f"Article '{title}' assigned categories: {categories}")
-            
-            processed_article = {
-                'title': title,
-                'text': text,
-                'date': date,
-                'categories': categories
-            }
-            
-            processed_articles.append(processed_article)
-            
+            try:
+                processed = processor.process_article(article)
+                if processed:
+                    processed_articles.append(processed)
+            except Exception as e:
+                logger.error(f"Error processing article {article.get('title', 'Unknown')}: {str(e)}")
+        
+        logger.info(f"Successfully processed {len(processed_articles)} articles")
+        
+        # Δημιουργία backup του τρέχοντος processed_articles.json
+        processed_path = data_dir / 'processed_articles.json'
+        if processed_path.exists():
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            backup_path = data_dir / f'processed_articles_backup_{timestamp}.json'
+            processed_path.rename(backup_path)
+            logger.info(f"Created backup at {backup_path}")
+        
         # Αποθήκευση των επεξεργασμένων άρθρων
-        output_file = data_dir / 'processed_articles.json'
-        with open(output_file, 'w', encoding='utf-8') as f:
+        with open(processed_path, 'w', encoding='utf-8') as f:
             json.dump(processed_articles, f, ensure_ascii=False, indent=2)
-            
-        logger.info(f"Saved {len(processed_articles)} processed articles to {output_file}")
+        logger.info(f"Saved processed articles to {processed_path}")
+        
+        return True
         
     except Exception as e:
-        logger.error(f"Error processing articles: {str(e)}")
-        raise
+        logger.error(f"Error in reprocess_articles: {str(e)}")
+        return False
 
 if __name__ == "__main__":
-    main() 
+    reprocess_articles() 

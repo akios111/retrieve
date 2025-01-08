@@ -42,4 +42,10 @@ mypy>=1.0.0
 python-dotenv>=0.19.0
 requests>=2.26.0
 pathlib>=1.0.1
-concurrent-log-handler>=0.9.20 
+concurrent-log-handler>=0.9.20
+
+# Semantic Search
+transformers>=4.30.0
+torch>=2.0.0
+sentence-transformers>=2.2.2
+numpy>=1.24.0 

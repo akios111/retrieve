@@ -68,7 +68,7 @@ class InvertedIndex:
     def load_processed_articles(self, file_path: str = 'data/processed_articles.json') -> List[Dict]:
         """Φόρτωση των επεξεργασμένων άρθρων."""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, 'r', encoding='utf-8-sig') as f:
                 articles = json.load(f)
             self.logger.info(f'Φορτώθηκαν {len(articles)} επεξεργασμένα άρθρα')
             return articles
@@ -78,8 +78,8 @@ class InvertedIndex:
 
     def _process_article(self, article: Dict) -> Tuple[str, Dict[str, List[int]], int]:
         """Επεξεργασία ενός άρθρου για παράλληλη εκτέλεση."""
-        doc_id = article['title']
-        tokens = article['lemmatized_tokens']
+        doc_id = article.get('title', '')
+        tokens = article.get('tokens', [])  # Χρησιμοποιούμε το κλειδί 'tokens' αντί για 'lemmatized_tokens'
         doc_length = len(tokens)
         
         # Καταγραφή των θέσεων για κάθε token
@@ -124,8 +124,8 @@ class InvertedIndex:
             
         # Υπολογισμός TF-IDF vectors με παράλληλη επεξεργασία
         def process_doc_vector(article):
-            doc_id = article['title']
-            tokens = article['lemmatized_tokens']
+            doc_id = article.get('title', '')
+            tokens = article.get('tokens', [])  # Χρησιμοποιούμε το κλειδί 'tokens' αντί για 'lemmatized_tokens'
             
             term_freq = defaultdict(int)
             for token in tokens:

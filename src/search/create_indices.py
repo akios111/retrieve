@@ -18,7 +18,7 @@ def setup_logging():
 
 def load_articles(data_dir: str = 'data') -> list:
     """Φόρτωση των επεξεργασμένων άρθρων."""
-    with open(Path(data_dir) / 'processed_articles.json', 'r', encoding='utf-8') as f:
+    with open(Path(data_dir) / 'processed_articles.json', 'r', encoding='utf-8-sig') as f:
         return json.load(f)
 
 def create_inverted_index(articles: list) -> dict:
@@ -27,8 +27,8 @@ def create_inverted_index(articles: list) -> dict:
     
     for article in articles:
         doc_id = article['title']
-        # Χρήση των lemmatized tokens για καλύτερη αναζήτηση
-        for position, token in enumerate(article['lemmatized_tokens']):
+        # Χρήση των tokens για την αναζήτηση
+        for position, token in enumerate(article['tokens']):
             if token not in index[token]:
                 index[token][doc_id] = []
             index[token][doc_id].append(position)
@@ -55,7 +55,7 @@ def create_document_vectors(articles: list, index: dict, idf: dict) -> dict:
         term_freq = defaultdict(int)
         
         # Υπολογισμός term frequencies
-        for token in article['lemmatized_tokens']:
+        for token in article['tokens']:
             term_freq[token] += 1
         
         # Δημιουργία διανύσματος με tf-idf τιμές
