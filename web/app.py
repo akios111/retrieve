@@ -3,6 +3,7 @@ import sys
 import os
 import json
 from datetime import datetime
+import numpy as np
 
 # Προσθήκη του parent directory στο path για να μπορούμε να κάνουμε import τα άλλα modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -60,30 +61,56 @@ def search():
         results = search_engine.search(query, method=method)
         app.logger.info(f"Raw search results: {results}")  # Debug log
         
+        if not results:
+            return jsonify({
+                'query': query,
+                'method': method,
+                'results': [],
+                'message': 'Δεν βρέθηκαν αποτελέσματα'
+            })
+        
         filtered_results = []
         
-        for title, score, snippet in results:
+        for title, score in results:
             try:
-                article = search_engine.articles[title]
+                if not isinstance(score, (int, float)) or np.isnan(score):
+                    app.logger.warning(f"Invalid score for {title}: {score}")
+                    continue
+                    
+                article = search_engine.articles.get(title)
+                if not article:
+                    app.logger.warning(f"Article not found: {title}")
+                    continue
+                    
                 app.logger.info(f"Processing article: {title}")  # Debug log
                 
                 # Φιλτράρισμα με βάση την ημερομηνία
                 if date_from or date_to:
-                    article_date = datetime.strptime(article['date'], '%Y-%m-%d')
-                    if date_from:
-                        from_date = datetime.strptime(date_from, '%Y-%m-%d')
-                        if article_date < from_date:
-                            continue
-                    if date_to:
-                        to_date = datetime.strptime(date_to, '%Y-%m-%d')
-                        if article_date > to_date:
-                            continue
+                    try:
+                        article_date = datetime.strptime(article.get('date', ''), '%Y-%m-%d')
+                        if date_from:
+                            from_date = datetime.strptime(date_from, '%Y-%m-%d')
+                            if article_date < from_date:
+                                continue
+                        if date_to:
+                            to_date = datetime.strptime(date_to, '%Y-%m-%d')
+                            if article_date > to_date:
+                                continue
+                    except ValueError as e:
+                        app.logger.warning(f"Date parsing error for {title}: {str(e)}")
+                        continue
                 
                 # Φιλτράρισμα με βάση τις κατηγορίες
                 if categories:
-                    article_categories = set(article['categories'])
+                    article_categories = set(article.get('categories', []))
                     if not any(cat in article_categories for cat in categories):
                         continue
+                
+                # Δημιουργία snippet από το περιεχόμενο του άρθρου
+                content = article.get('content', '')
+                if not content:
+                    content = article.get('summary', '')  # Fallback στο summary αν δεν υπάρχει content
+                snippet = content[:200] + '...' if len(content) > 200 else content
                 
                 filtered_results.append({
                     'title': title,
@@ -96,7 +123,15 @@ def search():
             except Exception as e:
                 app.logger.error(f"Error processing article {title}: {str(e)}")
                 continue
-        
+
+        if not filtered_results:
+            return jsonify({
+                'query': query,
+                'method': method,
+                'results': [],
+                'message': 'Δεν βρέθηκαν αποτελέσματα μετά το φιλτράρισμα'
+            })
+
         response = {
             'query': query,
             'method': method,
@@ -112,7 +147,10 @@ def search():
         
     except Exception as e:
         app.logger.error(f"Search error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'error': str(e),
+            'message': 'Σφάλμα κατά την αναζήτηση'
+        }), 500
 
 @app.route('/feedback', methods=['POST'])
 def feedback():

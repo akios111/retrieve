@@ -44,11 +44,15 @@ class TextPreprocessor:
         try:
             # Καθαρισμός και κανονικοποίηση
             text = text.lower()
-            text = re.sub(r'[^\w\s\u0370-\u03FF]', ' ', text)  # Κρατάμε μόνο ελληνικούς χαρακτήρες
             
-            # Χρήση RegexpTokenizer για ελληνικές λέξεις
-            tokenizer = RegexpTokenizer(r'[Α-Ωα-ωίϊΐόάέύϋΰήώ]+(?:-[Α-Ωα-ωίϊΐόάέύϋΰήώ]+)*')
-            tokens = tokenizer.tokenize(text)
+            # Αφαίρεση ειδικών χαρακτήρων αλλά διατήρηση γραμμάτων και αριθμών
+            text = re.sub(r'[^Α-Ωα-ωίϊΐόάέύϋΰήώ\s\d]', ' ', text)
+            
+            # Χρήση απλού tokenizer για διαχωρισμό λέξεων
+            tokens = text.split()
+            
+            # Φιλτράρισμα για να κρατήσουμε μόνο έγκυρα tokens
+            tokens = [token for token in tokens if any('\u0370' <= c <= '\u03FF' for c in token)]
             
             return tokens
             
@@ -112,8 +116,8 @@ class TextPreprocessor:
         # Αφαίρεση URLs
         text = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '', text)
         
-        # Αφαίρεση ειδικών χαρακτήρων
-        text = re.sub(r'[^\w\s\u0370-\u03FF]', ' ', text)
+        # Διατήρηση ελληνικών χαρακτήρων, αριθμών και βασικών σημείων στίξης
+        text = re.sub(r'[^Α-Ωα-ωίϊΐόάέύϋΰήώ\s\d.,!?]', ' ', text)
         
         # Κανονικοποίηση
         text = self.normalize_greek_text(text)

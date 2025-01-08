@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List, Dict, Set, Tuple
 from collections import defaultdict
 import numpy as np
+from datetime import datetime
 from src.search.search_engine import SearchEngine
 
 class SearchEvaluator:
@@ -11,19 +12,42 @@ class SearchEvaluator:
         self.setup_logging()
         self.search_engine = SearchEngine()
         
-        # Εκτύπωση των διαθέσιμων άρθρων
-        print("\nΔιαθέσιμα άρθρα στη βάση δεδομένων:")
-        print("-" * 80)
-        for title in sorted(self.search_engine.articles.keys()):
-            print(f"- {title}")
-        print("-" * 80 + "\n")
+        # Δημιουργία φακέλου για τα αποτελέσματα
+        self.results_dir = Path("evaluation_results")
+        self.results_dir.mkdir(exist_ok=True)
+        
+        # Δημιουργία ονόματος αρχείου με timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.results_file = self.results_dir / f"evaluation_results_{timestamp}.txt"
+        
+        # Εκτύπωση των διαθέσιμων άρθρων στο αρχείο
+        with open(self.results_file, "w", encoding="utf-8") as f:
+            f.write("\nΔιαθέσιμα άρθρα στη βάση δεδομένων:\n")
+            f.write("-" * 80 + "\n")
+            for title in sorted(self.search_engine.articles.keys()):
+                f.write(f"- {title}\n")
+            f.write("-" * 80 + "\n\n")
             
         self.test_queries = self.load_test_queries()
         
     def setup_logging(self):
+        """Βελτιωμένο setup για logging με file handler."""
+        # Δημιουργία φακέλου για logs
+        log_dir = Path("logs")
+        log_dir.mkdir(exist_ok=True)
+        
+        # Δημιουργία ονόματος αρχείου log με timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = log_dir / f"evaluation_{timestamp}.log"
+        
+        # Ρύθμιση logging
         logging.basicConfig(
             level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s'
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_file, encoding='utf-8'),
+                logging.StreamHandler()  # Για εμφάνιση στην κονσόλα
+            ]
         )
         self.logger = logging.getLogger(__name__)
         
@@ -356,54 +380,58 @@ class SearchEvaluator:
         }
         
     def print_evaluation_results(self, results: Dict[str, Dict[str, float]]):
-        """Εκτύπωση των αποτελεσμάτων αξιολόγησης με βελτιωμένη μορφοποίηση."""
-        print("\nΑποτελέσματα Αξιολόγησης:")
-        print("-" * 80)
-        
-        # Ομαδοποίηση ανά μέθοδο
-        method_results = defaultdict(list)
-        for query, metrics in results.items():
-            if query != "overall":
-                method = next((q["method"] for q in self.test_queries if q["query"] == query), None)
-                if method:
-                    method_results[method].append((query, metrics))
-        
-        # Εκτύπωση αποτελεσμάτων ανά μέθοδο
-        for method in ["boolean", "vsm", "bm25"]:
-            print(f"\n{method.upper()} Queries:")
-            print("-" * 40)
+        """Εκτύπωση των αποτελεσμάτων αξιολόγησης σε αρχείο."""
+        with open(self.results_file, "a", encoding="utf-8") as f:
+            f.write("\nΑποτελέσματα Αξιολόγησης:\n")
+            f.write("-" * 80 + "\n")
             
-            method_metrics = defaultdict(float)
-            num_queries = len(method_results[method])
+            # Ομαδοποίηση ανά μέθοδο
+            method_results = defaultdict(list)
+            for query, metrics in results.items():
+                if query != "overall":
+                    method = next((q["method"] for q in self.test_queries if q["query"] == query), None)
+                    if method:
+                        method_results[method].append((query, metrics))
             
-            for query, metrics in method_results[method]:
-                print(f"\nQuery: {query}")
-                print(f"Precision: {metrics['precision']:.4f}")
-                print(f"Recall: {metrics['recall']:.4f}")
-                print(f"F1-score: {metrics['f1']:.4f}")
-                print(f"NDCG: {metrics['ndcg']:.4f}")
-                print(f"MAP: {metrics['map']:.4f}")
-                print(f"Αριθμός αποτελεσμάτων: {metrics['num_results']}")
+            # Εκτύπωση αποτελεσμάτων ανά μέθοδο
+            for method in ["boolean", "vsm", "bm25"]:
+                f.write(f"\n{method.upper()} Queries:\n")
+                f.write("-" * 40 + "\n")
                 
-                # Συγκέντρωση μετρικών
-                for metric in ['precision', 'recall', 'f1', 'ndcg', 'map']:
-                    method_metrics[metric] += metrics[metric]
+                method_metrics = defaultdict(float)
+                num_queries = len(method_results[method])
+                
+                for query, metrics in method_results[method]:
+                    f.write(f"\nQuery: {query}\n")
+                    f.write(f"Precision: {metrics['precision']:.4f}\n")
+                    f.write(f"Recall: {metrics['recall']:.4f}\n")
+                    f.write(f"F1-score: {metrics['f1']:.4f}\n")
+                    f.write(f"NDCG: {metrics['ndcg']:.4f}\n")
+                    f.write(f"MAP: {metrics['map']:.4f}\n")
+                    f.write(f"Αριθμός αποτελεσμάτων: {metrics['num_results']}\n")
+                    
+                    # Συγκέντρωση μετρικών
+                    for metric in ['precision', 'recall', 'f1', 'ndcg', 'map']:
+                        method_metrics[metric] += metrics[metric]
+                
+                if num_queries > 0:
+                    f.write(f"\nΜέσες τιμές για {method.upper()}:\n")
+                    f.write("-" * 30 + "\n")
+                    for metric in ['precision', 'recall', 'f1', 'ndcg', 'map']:
+                        avg_value = method_metrics[metric] / num_queries
+                        f.write(f"Μέσο {metric}: {avg_value:.4f}\n")
             
-            if num_queries > 0:
-                print(f"\nΜέσες τιμές για {method.upper()}:")
-                print("-" * 30)
-                for metric in ['precision', 'recall', 'f1', 'ndcg', 'map']:
-                    avg_value = method_metrics[metric] / num_queries
-                    print(f"Μέσο {metric}: {avg_value:.4f}")
-        
-        print("\nΣυνολικά Αποτελέσματα:")
-        print("-" * 80)
-        overall = results["overall"]
-        print(f"Μέση Precision: {overall['precision']:.4f}")
-        print(f"Μέση Recall: {overall['recall']:.4f}")
-        print(f"Μέσο F1-score: {overall['f1']:.4f}")
-        print(f"Μέσο NDCG: {overall['ndcg']:.4f}")
-        print(f"Μέσο MAP: {overall['map']:.4f}")
+            f.write("\nΣυνολικά Αποτελέσματα:\n")
+            f.write("-" * 80 + "\n")
+            overall = results["overall"]
+            f.write(f"Μέση Precision: {overall['precision']:.4f}\n")
+            f.write(f"Μέση Recall: {overall['recall']:.4f}\n")
+            f.write(f"Μέσο F1-score: {overall['f1']:.4f}\n")
+            f.write(f"Μέσο NDCG: {overall['ndcg']:.4f}\n")
+            f.write(f"Μέσο MAP: {overall['map']:.4f}\n")
+            
+            # Εκτύπωση σύνδεσμου στο αρχείο αποτελεσμάτων
+            self.logger.info(f"Τα αποτελέσματα αποθηκεύτηκαν στο αρχείο: {self.results_file}")
 
     def evaluate_all(self) -> Dict[str, Dict[str, float]]:
         """Βελτιωμένη αξιολόγηση όλων των test queries."""
