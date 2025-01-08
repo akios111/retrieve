@@ -86,17 +86,9 @@ class SearchEngine:
             logger.error(f"Error loading resources: {str(e)}")
             raise
             
-    def search(self, query: str, method: str = 'vsm', k: int = 10) -> List[Tuple[str, float]]:
+    def search(self, query: str, method: str = 'vsm', k: int = 10, categories: List[str] = None, date_from: str = None, date_to: str = None) -> List[Tuple[str, float]]:
         """
         Εκτέλεση αναζήτησης με την επιλεγμένη μέθοδο.
-        
-        Args:
-            query: Το ερώτημα αναζήτησης
-            method: Η μέθοδος αναζήτησης ('boolean', 'vsm', ή 'bm25')
-            k: Αριθμός αποτελεσμάτων προς επιστροφή
-            
-        Returns:
-            Λίστα με tuples (τίτλος, σκορ) ταξινομημένη κατά φθίνουσα σειρά σκορ
         """
         try:
             if method == 'boolean':
@@ -107,9 +99,38 @@ class SearchEngine:
                 results = self.bm25_search(query)
             else:
                 raise ValueError(f"Μη έγκυρη μέθοδος αναζήτησης: {method}")
+            
+            # Φιλτράρισμα αποτελεσμάτων
+            filtered_results = []
+            for doc_id, score in results:
+                article = self.articles.get(doc_id)
+                if not article:
+                    continue
+                    
+                # Φιλτράρισμα με βάση τις κατηγορίες
+                if categories:
+                    article_categories = article.get('categories', [])
+                    if not any(cat in article_categories for cat in categories):
+                        continue
+                        
+                # Φιλτράρισμα με βάση την ημερομηνία
+                if date_from or date_to:
+                    article_date = article.get('date', '')
+                    if article_date:
+                        article_date = datetime.strptime(article_date, '%Y-%m-%d')
+                        if date_from:
+                            from_date = datetime.strptime(date_from, '%Y-%m-%d')
+                            if article_date < from_date:
+                                continue
+                        if date_to:
+                            to_date = datetime.strptime(date_to, '%Y-%m-%d')
+                            if article_date > to_date:
+                                continue
+                            
+                filtered_results.append((doc_id, score))
                 
             # Εφαρμογή Learning to Rank
-            ranked_results = self.apply_learning_to_rank(query, results)
+            ranked_results = self.apply_learning_to_rank(query, filtered_results)
             
             # Επιστροφή των top-k αποτελεσμάτων
             return ranked_results[:k]
@@ -141,21 +162,15 @@ class SearchEngine:
     def vsm_search(self, query: str) -> List[Tuple[str, float]]:
         """Εκτέλεση Vector Space Model αναζήτησης."""
         try:
-            logger.info(f"VSM search - Processing query: {query}")
             # Επεξεργασία του ερωτήματος
             processed_query = self.text_processor.clean_text(query)
             query_terms = self.text_processor.tokenize_and_remove_stopwords(processed_query)
-            logger.info(f"VSM search - Query terms: {query_terms}")
             
-            # Υπολογισμός διανύσματος ερωτήματος
+            # Επολογισμός διανύσματος ερωτήματος
             query_vector = defaultdict(float)
             for term in query_terms:
                 if term in self.idf:
                     query_vector[term] += self.idf[term]
-                    logger.info(f"VSM search - Found term '{term}' in IDF")
-                else:
-                    logger.warning(f"VSM search - Term '{term}' not in IDF")
-            logger.info(f"VSM search - Final query vector: {dict(query_vector)}")
                     
             # Υπολογισμός ομοιότητας συνημιτόνου
             scores = []
@@ -163,23 +178,8 @@ class SearchEngine:
                 score = self._cosine_similarity(query_vector, doc_vector)
                 if not np.isnan(score) and score > 0:  # Έλεγχος για θετικά σκορ
                     scores.append((doc_id, float(score)))
-                    if len(scores) <= 3:  # Log μόνο για τα πρώτα 3 έγγραφα
-                        logger.info(f"VSM search - Document '{doc_id}' got score {score}")
-                        common_terms = set(query_vector.keys()) & set(doc_vector.keys())
-                        logger.info(f"VSM search - Common terms with '{doc_id}': {common_terms}")
             
-            sorted_scores = sorted(scores, key=lambda x: x[1], reverse=True)
-            logger.info(f"VSM search - Found {len(sorted_scores)} results")
-            if sorted_scores:
-                logger.info(f"VSM search - Top 3 results: {sorted_scores[:3]}")
-                # Εμφάνιση των τίτλων των top-3 αποτελεσμάτων
-                for doc_id, score in sorted_scores[:3]:
-                    article = self.articles.get(doc_id, {})
-                    logger.info(f"VSM search - Title: {doc_id}")
-                    logger.info(f"VSM search - Score: {score}")
-                    logger.info(f"VSM search - Categories: {article.get('categories', [])}")
-            
-            return sorted_scores
+            return sorted(scores, key=lambda x: x[1], reverse=True)
             
         except Exception as e:
             logger.error(f"Error in VSM search: {str(e)}")

@@ -26,11 +26,20 @@
             padding: 15px;
             border: 1px solid #ddd;
             border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .result-item:hover {
+            background-color: #f8f9fa;
         }
         .result-title {
             color: #1a0dab;
             font-size: 18px;
             margin-bottom: 5px;
+            text-decoration: none;
+        }
+        .result-title:hover {
+            text-decoration: underline;
         }
         .result-score {
             color: #006621;
@@ -40,6 +49,7 @@
             color: #545454;
             font-size: 14px;
             margin-top: 5px;
+            line-height: 1.4;
         }
         #error-message {
             color: #dc3545;
@@ -106,6 +116,44 @@
             width: 100%;
             height: 300px;
         }
+        .article-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            z-index: 1000;
+            overflow-y: auto;
+        }
+        .article-content {
+            position: relative;
+            background-color: #fff;
+            margin: 5% auto;
+            padding: 20px;
+            width: 80%;
+            max-width: 800px;
+            border-radius: 5px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .article-text {
+            margin-top: 20px;
+            line-height: 1.6;
+            font-size: 16px;
+        }
+        .close-modal {
+            position: absolute;
+            right: 15px;
+            top: 10px;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+            transition: color 0.2s;
+        }
+        .close-modal:hover {
+            color: #000;
+        }
     </style>
 </head>
 <body>
@@ -139,23 +187,23 @@
                         <div class="filter-label">Κατηγορίες</div>
                         <div class="category-filter">
                             <div class="form-check">
-                                <input class="form-check-input" type="checkbox" value="επιστήμη" id="catScience">
+                                <input class="form-check-input" type="checkbox" value="Επιστήμη" id="catScience">
                                 <label class="form-check-label" for="catScience">Επιστήμη</label>
                             </div>
                             <div class="form-check">
-                                <input class="form-check-input" type="checkbox" value="ιστορία" id="catHistory">
+                                <input class="form-check-input" type="checkbox" value="Ιστορία" id="catHistory">
                                 <label class="form-check-label" for="catHistory">Ιστορία</label>
                             </div>
                             <div class="form-check">
-                                <input class="form-check-input" type="checkbox" value="τέχνη" id="catArt">
+                                <input class="form-check-input" type="checkbox" value="Τέχνη" id="catArt">
                                 <label class="form-check-label" for="catArt">Τέχνη</label>
                             </div>
                             <div class="form-check">
-                                <input class="form-check-input" type="checkbox" value="φιλοσοφία" id="catPhilosophy">
+                                <input class="form-check-input" type="checkbox" value="Φιλοσοφία" id="catPhilosophy">
                                 <label class="form-check-label" for="catPhilosophy">Φιλοσοφία</label>
                             </div>
                             <div class="form-check">
-                                <input class="form-check-input" type="checkbox" value="τεχνολογία" id="catTechnology">
+                                <input class="form-check-input" type="checkbox" value="Τεχνολογία" id="catTechnology">
                                 <label class="form-check-label" for="catTechnology">Τεχνολογία</label>
                             </div>
                         </div>
@@ -293,7 +341,7 @@
                 const resultsDiv = $('#results');
                 resultsDiv.empty();
                 
-                if (data.results.length === 0) {
+                if (!data.results || data.results.length === 0) {
                     resultsDiv.html('<p class="text-center">Δεν βρέθηκαν αποτελέσματα</p>');
                     return;
                 }
@@ -303,30 +351,44 @@
                     const highlightedSnippet = highlightSearchTerms(result.snippet, data.query);
                     
                     const resultHtml = `
-                        <div class="result-item">
-                            <div class="result-title">${result.title}</div>
+                        <div class="result-item" data-title="${result.title}">
+                            <h3 class="result-title">${result.title}</h3>
                             <div class="result-score">Score: ${result.score.toFixed(4)}</div>
+                            <div class="result-categories">Κατηγορίες: ${result.categories.join(', ')}</div>
+                            ${result.date ? `<div class="result-date">Ημερομηνία: ${result.date}</div>` : ''}
                             <div class="result-snippet">${highlightedSnippet}</div>
                         </div>
                     `;
                     resultsDiv.append(resultHtml);
                 });
+                
+                // Event handler για το άνοιγμα του άρθρου
+                $('.result-item').click(function() {
+                    const title = $(this).data('title');
+                    $.ajax({
+                        url: '/article',
+                        method: 'POST',
+                        data: { title: title },
+                        success: function(response) {
+                            showArticleModal(response.title, response.content);
+                        }
+                    });
+                });
             }
             
             function highlightSearchTerms(text, query) {
-                const terms = query.toLowerCase()
-                    .replace(/&&|\|\|/g, ' ')
-                    .replace(/!/g, ' ')
-                    .split(/\s+/)
-                    .filter(term => term.length > 2);
+                // Διαχωρισμός του query σε όρους
+                const terms = query.toLowerCase().split(/\s+/);
                 
-                let highlightedText = text;
+                // Αντικατάσταση κάθε όρου με την highlighted έκδοσή του
                 terms.forEach(term => {
-                    const regex = new RegExp(`(${term})`, 'gi');
-                    highlightedText = highlightedText.replace(regex, '<span class="highlight">$1</span>');
+                    if (term && !['και', 'ή', 'όχι', '&&', '||', '!'].includes(term)) {
+                        const regex = new RegExp(`(${term})`, 'gi');
+                        text = text.replace(regex, '<span class="highlight">$1</span>');
+                    }
                 });
                 
-                return highlightedText;
+                return text;
             }
             
             function visualizeResults(data) {
@@ -400,6 +462,39 @@
                     }
                 });
             });
+            
+            function showArticleModal(title, content) {
+                // Αφαίρεση προηγούμενου modal αν υπάρχει
+                $('.article-modal').remove();
+                
+                const modalHtml = `
+                    <div class="article-modal" style="display: block;">
+                        <div class="article-content">
+                            <span class="close-modal">&times;</span>
+                            <h2>${title}</h2>
+                            <div class="article-text">${content.replace(/\n/g, '<br>')}</div>
+                        </div>
+                    </div>
+                `;
+                
+                $('body').append(modalHtml);
+                
+                // Event handlers για κλείσιμο του modal
+                $('.close-modal').click(function() {
+                    $('.article-modal').remove();
+                });
+                
+                $(window).click(function(e) {
+                    if ($(e.target).hasClass('article-modal')) {
+                        $('.article-modal').remove();
+                    }
+                });
+                
+                // Αποτροπή του κλεισίματος όταν κάνουμε κλικ μέσα στο content
+                $('.article-content').click(function(e) {
+                    e.stopPropagation();
+                });
+            }
         });
     </script>
 </body>

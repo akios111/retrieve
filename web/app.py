@@ -39,27 +39,33 @@ def suggest():
 
 @app.route('/search', methods=['POST'])
 def search():
-    query = request.form.get('query', '')
-    method = request.form.get('method', 'vsm')
-    date_from = request.form.get('date_from')
-    date_to = request.form.get('date_to')
-    categories = json.loads(request.form.get('categories', '[]'))
-    
-    if not query:
-        return jsonify({'error': 'Το ερώτημα δεν μπορεί να είναι κενό'}), 400
-        
-    if method not in ['boolean', 'vsm', 'bm25']:
-        return jsonify({'error': 'Μη έγκυρη μέθοδος αναζήτησης'}), 400
-        
     try:
-        # Έλεγχος cache
-        cache_key = f"{query}_{method}_{date_from}_{date_to}_{','.join(sorted(categories))}"
-        if cache_key in query_cache:
-            return jsonify(query_cache[cache_key])
+        query = request.form.get('query', '')
+        method = request.form.get('method', 'vsm')
+        date_from = request.form.get('date_from')
+        date_to = request.form.get('date_to')
+        categories_raw = request.form.get('categories', '[]')
         
-        # Εφαρμογή φίλτρων
-        results = search_engine.search(query, method=method)
-        app.logger.info(f"Raw search results: {results}")  # Debug log
+        try:
+            categories = json.loads(categories_raw)
+        except json.JSONDecodeError as e:
+            app.logger.error(f"Error parsing categories JSON: {str(e)}")
+            categories = []
+        
+        if not query:
+            return jsonify({'error': 'Το ερώτημα δεν μπορεί να είναι κενό'}), 400
+            
+        if method not in ['boolean', 'vsm', 'bm25']:
+            return jsonify({'error': 'Μη έγκυρη μέθοδος αναζήτησης'}), 400
+            
+        # Εκτέλεση αναζήτησης με τα φίλτρα
+        results = search_engine.search(
+            query=query,
+            method=method,
+            categories=categories if categories else None,
+            date_from=date_from if date_from else None,
+            date_to=date_to if date_to else None
+        )
         
         if not results:
             return jsonify({
@@ -68,89 +74,57 @@ def search():
                 'results': [],
                 'message': 'Δεν βρέθηκαν αποτελέσματα'
             })
-        
-        filtered_results = []
-        
+            
+        # Εμπλουτισμός αποτελεσμάτων
+        enhanced_results = []
         for title, score in results:
-            try:
-                if not isinstance(score, (int, float)) or np.isnan(score):
-                    app.logger.warning(f"Invalid score for {title}: {score}")
-                    continue
-                    
-                article = search_engine.articles.get(title)
-                if not article:
-                    app.logger.warning(f"Article not found: {title}")
-                    continue
-                    
-                app.logger.info(f"Processing article: {title}")  # Debug log
-                
-                # Φιλτράρισμα με βάση την ημερομηνία
-                if date_from or date_to:
-                    try:
-                        article_date = datetime.strptime(article.get('date', ''), '%Y-%m-%d')
-                        if date_from:
-                            from_date = datetime.strptime(date_from, '%Y-%m-%d')
-                            if article_date < from_date:
-                                continue
-                        if date_to:
-                            to_date = datetime.strptime(date_to, '%Y-%m-%d')
-                            if article_date > to_date:
-                                continue
-                    except ValueError as e:
-                        app.logger.warning(f"Date parsing error for {title}: {str(e)}")
-                        continue
-                
-                # Φιλτράρισμα με βάση τις κατηγορίες
-                if categories:
-                    article_categories = set(article.get('categories', []))
-                    if not any(cat in article_categories for cat in categories):
-                        continue
-                
-                # Δημιουργία snippet από το περιεχόμενο του άρθρου
-                content = article.get('content', '')
-                if not content:
-                    content = article.get('summary', '')  # Fallback στο summary αν δεν υπάρχει content
-                snippet = content[:200] + '...' if len(content) > 200 else content
-                
-                filtered_results.append({
-                    'title': title,
-                    'score': float(score),  # Μετατροπή σε float για σωστή σειριοποίηση
-                    'snippet': snippet,
-                    'categories': article.get('categories', []),
-                    'date': article.get('date', '')
-                })
-                
-            except Exception as e:
-                app.logger.error(f"Error processing article {title}: {str(e)}")
+            article = search_engine.articles.get(title)
+            if not article:
                 continue
-
-        if not filtered_results:
-            return jsonify({
-                'query': query,
-                'method': method,
-                'results': [],
-                'message': 'Δεν βρέθηκαν αποτελέσματα μετά το φιλτράρισμα'
+                
+            # Δημιουργία snippet
+            text = article.get('text', '')
+            snippet = text[:200] + '...' if len(text) > 200 else text
+            
+            enhanced_results.append({
+                'title': title,
+                'score': float(score),
+                'snippet': snippet,
+                'categories': article.get('categories', []),
+                'date': article.get('date', '')
             })
-
+            
         response = {
             'query': query,
             'method': method,
-            'results': filtered_results
+            'results': enhanced_results
         }
-        
-        app.logger.info(f"Final response: {response}")  # Debug log
-        
-        # Αποθήκευση στο cache
-        query_cache[cache_key] = response
         
         return jsonify(response)
         
     except Exception as e:
-        app.logger.error(f"Search error: {str(e)}")
+        app.logger.error(f"Error in search: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/article', methods=['POST'])
+def get_article():
+    try:
+        title = request.form.get('title')
+        if not title:
+            return jsonify({'error': 'No title provided'}), 400
+            
+        article = search_engine.articles.get(title)
+        if not article:
+            return jsonify({'error': 'Article not found'}), 404
+            
         return jsonify({
-            'error': str(e),
-            'message': 'Σφάλμα κατά την αναζήτηση'
-        }), 500
+            'title': title,
+            'content': article.get('text', '')
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error fetching article: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/feedback', methods=['POST'])
 def feedback():
